@@ -7,11 +7,14 @@ use vga.vga_data.all;
 
 library ads;
 use ads.ads_fixed.all;
+use ads.ads_complex_pkg.all;
+
+use work.seed_table.all;
 
 entity top_level is
 	generic(
 		vga_res: vga_timing := vga_res_default;
-		iterations: natural := 32;
+		iterations: natural := 16;
 		threshold: ads_sfixed := to_ads_sfixed(4)
 	);
 	port (
@@ -28,8 +31,7 @@ end entity top_level;
 
 architecture arch1 of top_level is
 	signal clock_signal: 	std_logic;
-	signal wren_signal: 		std_logic;
-
+	
 	signal point_signal:			coordinate;
 	signal point_valid_signal:	boolean;
 	
@@ -37,6 +39,10 @@ architecture arch1 of top_level is
 	
 	signal iteration_count:	natural range 0 to iterations - 1;
 	signal iteration_read: std_logic_vector(4 downto 0);
+	
+	signal enable_vga: boolean;
+	
+	signal seed_index: seed_index_type;
 
 	
 	component pll
@@ -50,18 +56,17 @@ architecture arch1 of top_level is
 	component control_unit
 		generic (
 			threshold:		ads_sfixed := to_ads_sfixed(4);
-			total_iterations:	natural := 32 
+			total_iterations:	natural := 16 
 		);
 		PORT
 		(
 			-- Input ports
 			reset:		in		std_logic;
 			fpga_clock:	in		std_logic;
+			c_value:		in		ads_complex;
 			-- Output ports
-			address:		out 	natural;
 			iterations:	out 	natural;
-			done:		 	out 	std_logic;
-			wren:			out 	std_logic
+			start_vga:	out	boolean
 		);
 	end component;
 	
@@ -75,6 +80,7 @@ architecture arch1 of top_level is
 			-- Input ports
 			c0:				in	std_logic; --clock input from pll
 			reset:			in	std_logic;
+			enable:			in boolean;
 			--input from control_unit to vga_fsm
 		
 			-- Output ports
@@ -85,36 +91,32 @@ architecture arch1 of top_level is
 		);
 	end component;
 	
-	component ram
-		generic (
-			data_width: positive := 5;
-			addr_Width: positive := 18
-		);
-		PORT
-		(
-			-- global
-			clock:	in std_logic;
 		
-			-- port A (write)
-			addr_a:	in std_logic_vector(addr_Width - 1 downto 0);
-			wren:		in std_logic;
-			data_in_a:	in std_logic_vector(data_width - 1 downto 0);
-		
-			-- port B (Read)
-			addr_b: in std_logic_vector(addr_width - 1 downto 0);
-			data_out_b:	out std_logic_Vector(data_width - 1 downto 0)
-		);
-	end component;
-	
 begin
-	red <= to_integer(unsigned(iteration_read(4 downto 1))) when point_valid_signal
-				else 0;
-	green <= to_integer(unsigned(iteration_read(4 downto 1))) when point_valid_signal
-				else 0;
-	blue <= to_integer(unsigned(iteration_read(4 downto 1))) when point_valid_signal
-				else 0;
+--	red <= to_integer(unsigned(iteration_read(4 downto 1))) when point_valid_signal
+--				else 0;
+--	green <= to_integer(unsigned(iteration_read(4 downto 1))) when point_valid_signal
+--				else 0;
+--	blue <= to_integer(unsigned(iteration_read(4 downto 1))) when point_valid_signal
+--				else 0;
 
-	read_address <= point_signal.y * 480 + point_signal.x;
+	gen_seed_index: process(clock_signal) is
+	begin
+		if rising_edge(clock_signal) then
+			if reset = '0' then
+				seed_index <= 0;
+			elsif (point_signal.x = vga_res.horizontal.active)
+						and (point_signal.y = vga_res.vertical.active) then
+				seed_index <= get_next_seed_index(seed_index);
+			end if;
+		end if;
+	end process gen_seed_index;
+
+	red <= iteration_count when point_valid_signal else 0;
+	blue <= 0;
+	green <= 0;
+
+	--read_address <= point_signal.y * 480 + point_signal.x;
 	
 	pll0: pll
 		port map(
@@ -124,21 +126,6 @@ begin
 			c0 		=> clock_signal
 		);
 		
-	ram0: ram
-		generic map (
-			data_width => 5,
-			addr_width => 18
-		)
-		port map(
-			--input signals
-			clock			=> clock_signal,
-			wren			=> wren_signal,
-			addr_a		=> std_logic_vector(to_unsigned(write_address, 18)),
-			data_in_a 	=> std_logic_vector(to_unsigned(iteration_count, 5)),
-			--output signals
-			addr_b		=> std_logic_vector(to_unsigned(read_address, 18)),
-			data_out_b	=> iteration_read
-		);
 		
 	signal_driver:vga_fsm
 		generic map (
@@ -148,6 +135,7 @@ begin
 			-- Input ports
 			c0 				=> clock_signal,
 			reset 			=> reset,
+			enable			=> enable_vga,
 			-- Output ports
 			point				=> point_signal,
 			point_valid		=> point_valid_signal,
@@ -163,11 +151,10 @@ begin
 		port map(
 			reset					=> reset,
 			fpga_clock			=> clock_signal,
+			c_value				=> seed_rom(seed_index), -- ( re => to_ads_sfixed(-0.3), im => to_ads_sfixed(0.6) ),
 			-- Output ports
-			address				=> write_address,
 			iterations			=> iteration_count,
-			done		 			=> open,
-			wren					=> wren_signal
+			start_vga			=> enable_Vga
 		);
 		
 		
