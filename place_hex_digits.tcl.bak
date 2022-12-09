@@ -14,7 +14,7 @@ proc set_pins { digits { name "digits" } } {
 	  for { set j 0 } { ${j} < 7 } { incr j } {
 		set location [ lindex [ lindex ${sseg_lamps} ${i} ] ${j} ]
 		set vector_position [ expr 7 * ${i} + ${j} ]
-		set_location_assignment PIN_${location} -to ${name}\[${vector_position}\]
+		set_location_assignment PIN_${location} -to ${name}\[${i}\].${lamp}
 		# incr j
 	  }
     }
